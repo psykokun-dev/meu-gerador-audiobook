@@ -1,13 +1,12 @@
 import streamlit as st
 import PyPDF2
 import pytesseract
-from pdf2image import convert_from_path
+from pdf2image import convert_from_path, pdfinfo_from_path
 import edge_tts
 import asyncio
 import re
 import tempfile
 
-# Configuração da página do site
 st.set_page_config(page_title="PDF para Audiobook", page_icon="🎧", layout="centered")
 
 async def criar_audio_neural(texto, caminho_saida):
@@ -22,7 +21,6 @@ def limpar_texto(texto):
     texto = re.sub(r'\s+', ' ', texto).strip()
     return texto
 
-# Interface principal
 st.title("🎧 Gerador de Audiobook Neural")
 st.write("Transforme qualquer livro ou artigo em PDF em um áudio super realista para ouvir no celular.")
 
@@ -43,11 +41,9 @@ if arquivo_enviado is not None:
         try:
             status_texto.info("Analisando o PDF...")
             
-            # Passo 1: Descobrir o tipo de PDF
             with open(caminho_pdf, 'rb') as arquivo:
                 leitor = PyPDF2.PdfReader(arquivo)
                 total_paginas = len(leitor.pages)
-                
                 texto_teste = ""
                 for i in range(min(3, total_paginas)):
                     extraido = leitor.pages[i].extract_text()
@@ -57,10 +53,8 @@ if arquivo_enviado is not None:
             media_letras = len(texto_teste) / min(3, total_paginas) if total_paginas > 0 else 0
             texto_completo = ""
             
-            # Passo 2: Extrair o texto da forma correta (Mantendo o arquivo aberto!)
             if media_letras > 100:
                 status_texto.info("Modo super rápido ativado (Texto Digital)...")
-                # Abrimos o arquivo de novo e deixamos ele aberto durante toda a extração
                 with open(caminho_pdf, 'rb') as arquivo_aberto:
                     leitor_completo = PyPDF2.PdfReader(arquivo_aberto)
                     for i, pagina in enumerate(leitor_completo.pages):
@@ -69,25 +63,26 @@ if arquivo_enviado is not None:
                             texto_completo += limpar_texto(texto_pagina) + " "
                         barra_progresso.progress((i + 1) / total_paginas)
             else:
-                status_texto.warning("PDF Escaneado detectado. Iniciando leitura visual (OCR)... Isso pode demorar.")
-                paginas = convert_from_path(caminho_pdf)
-                total_paginas = len(paginas)
-                for i, pagina in enumerate(paginas):
-                    texto_pagina = pytesseract.image_to_string(pagina, lang='por')
+                status_texto.warning("PDF Escaneado detectado. Iniciando leitura visual (OCR) otimizada para nuvem... Isso pode demorar.")
+                
+                # Descobre o total de páginas sem sobrecarregar a RAM
+                info = pdfinfo_from_path(caminho_pdf)
+                total_paginas = info["Pages"]
+                
+                # Lê uma página por vez
+                for i in range(1, total_paginas + 1):
+                    pagina_atual = convert_from_path(caminho_pdf, first_page=i, last_page=i)[0]
+                    texto_pagina = pytesseract.image_to_string(pagina_atual, lang='por')
                     texto_completo += limpar_texto(texto_pagina) + " "
-                    barra_progresso.progress((i + 1) / total_paginas)
+                    barra_progresso.progress(i / total_paginas)
                     
             status_texto.success(f"Leitura concluída! {len(texto_completo)} letras prontas. Gravando o áudio...")
             
-            # Gera o áudio final
             asyncio.run(criar_audio_neural(texto_completo, caminho_audio))
             
             st.success("🎉 Audiobook gerado com sucesso!")
-            
-            # Exibe um player para ouvir no próprio site
             st.audio(caminho_audio, format="audio/mp3")
             
-            # Botão para baixar o arquivo
             with open(caminho_audio, "rb") as arquivo_mp3:
                 st.download_button(
                     label="⬇️ Baixar Audiobook (MP3)",
